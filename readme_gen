@@ -1,0 +1,119 @@
+#!/bin/bash
+
+# readme_gen - Script to generate the README.md file
+
+# Function to display usage instructions
+usage() {
+    cat << EOF
+Generate the readme.md file
+Usage: $CMD [COMMAND]
+EOF
+}
+
+# Get the first argument passed to the script
+COMMAND="$1"
+
+# Function to extract a specific field from a JSON file
+function showField() {
+    # Read the specified field from the JSON file and format it
+    FIELD=$(cat "${1}" | docker exec -i jq jq -r ".$2" - | sed 's/</\&lt;/g; s/>/\&gt;/g')
+    if [[ ${FIELD} != "null" ]] ; then
+        echo ${FIELD} # Print the field if it exists
+        echo ""       # Add a blank line
+    fi
+}
+
+# Function to recursively parse folders and generate sections in README
+function parseFolder() {
+    # Loop through each subfolder in the specified directory
+    for folder in $(find $1 -mindepth 1 -maxdepth 1 -type d); do
+        folder_name=$(basename "$folder") # Get the folder name
+        SKIP="0"                          # Flag to determine if folder should be skipped
+        TITLE=$folder_name                # Default title is the folder name
+
+        # Map specific folder names to display titles
+        case $folder_name in
+            "blocks") TITLE="Blocks" ;;
+            "code-snippets") TITLE="Code Snippets" ;;
+            "parts") TITLE="Parts" ;;
+            "patterns") TITLE="Patterns" ;;
+            "plugins") TITLE="Plugins" ;;
+            "templates") TITLE="Templates" ;;
+            "js") TITLE="JavaScript" ;;
+            "php") TITLE="PHP" ;;
+            ".git" | "global_commands" | ".DS_Store") SKIP="1" ;;
+        esac
+
+        # Skip folders marked to be ignored
+        if [[ $SKIP == "0" ]] ; then
+            # Add folder title to README table of contents
+            echo "$2 [$TITLE](#$folder_name)" >> ${SCRIPT_DIR}/readme.md
+            echo "<a id='$folder_name'></a>" >> ${SCRIPT_DIR}/readme1.md
+            echo "$2 $TITLE" >> ${SCRIPT_DIR}/readme1.md
+
+            # Process files within the folder
+            FILES=$folder/*
+            HAS_LOWER_LEVELS="0"
+            for component in $FILES ; do
+                # If the component has a cover-sheet.json, extract metadata
+                if [[ -f "$component/cover-sheet.json" ]] ; then
+                    echo "["$(showField "$component/cover-sheet.json" "name")"](#"$(basename "$component")"); " >> ${SCRIPT_DIR}/readme.md
+                    echo "" >> ${SCRIPT_DIR}/readme1.md
+                    echo "<a id='$(basename "$component")'></a>" >> ${SCRIPT_DIR}/readme1.md
+                    echo "$2# " $(showField "$component/cover-sheet.json" "name") >> ${SCRIPT_DIR}/readme1.md
+                    showField "$component/cover-sheet.json" "summary" >> ${SCRIPT_DIR}/readme1.md
+                    echo "**Details:**" $(showField "$component/cover-sheet.json" "details") >> ${SCRIPT_DIR}/readme1.md
+                    echo "" >> ${SCRIPT_DIR}/readme1.md
+                    PATH_PART=$(echo "$component" | sed 's/\/Users\/malaikamirza\/CodeGeek\/codegeek-theme-fse-library\/\(.*\)/\1/')
+                    if test -f "$component/screenshot.png"; then
+                        echo "[Screenshot](https://codegeek.beanstalkapp.com/codegeek-theme-fse-library/browse/git/$PATH_PART/screenshot.png \"Screenshot\")" >> ${SCRIPT_DIR}/readme1.md
+                    fi
+                    echo "" >> ${SCRIPT_DIR}/readme1.md
+                    echo "**Developer:**" $(showField "$component/cover-sheet.json" "developer") >> ${SCRIPT_DIR}/readme1.md
+                    echo "" >> ${SCRIPT_DIR}/readme1.md
+                    if [[ $(showField "$component/cover-sheet.json" "samples") != "[]" ]] ; then
+                        echo "**Samples:**" >> ${SCRIPT_DIR}/readme1.md
+                        showField "$component/cover-sheet.json" "samples" | sed 's/^\[//;s/\]$//;s/", "/\n/g' >> ${SCRIPT_DIR}/readme1.md
+                        echo "" >> ${SCRIPT_DIR}/readme1.md
+                    fi
+                    echo "**Changelog:**" >> ${SCRIPT_DIR}/readme1.md
+                    showField "$component/cover-sheet.json" "changelog" | sed 's/^{//g' | sed 's/}$//g' | sed 's/"/ /g' | sed 's/: /:/g' | sed 's/,/\n/g' >> ${SCRIPT_DIR}/readme1.md
+                    echo "[Go to repository](https://codegeek.beanstalkapp.com/codegeek-theme-fse-library/browse/git/$PATH_PART \"Go to repository\")" >> ${SCRIPT_DIR}/readme1.md
+                elif [[ -f "$component/screenshot.png" ]] ; then
+                    PATH_PART=$(echo "$component" | sed 's/\/Users\/malaikamirza\/CodeGeek\/codegeek-theme-fse-library\/\(.*\)/\1/')
+                    echo "[" $(basename "$component") "](#"$(basename "$component")"); " >> ${SCRIPT_DIR}/readme.md
+                    echo "" >> ${SCRIPT_DIR}/readme1.md
+                    echo "<a id='$(basename "$component")'></a>" >> ${SCRIPT_DIR}/readme1.md
+                    echo "$2# " $(basename "$component") >> ${SCRIPT_DIR}/readme1.md
+                    echo "No cover sheet available for this component." >> ${SCRIPT_DIR}/readme1.md
+                    if test -f "$component/screenshot.png"; then
+                        echo "[Screenshot](https://codegeek.beanstalkapp.com/codegeek-theme-fse-library/browse/git/$PATH_PART/screenshot.png \"Screenshot\")" >> ${SCRIPT_DIR}/readme1.md
+                    fi
+                    echo "" >> ${SCRIPT_DIR}/readme1.md
+                elif [[ -d "$component" ]] ; then
+                    HAS_LOWER_LEVELS="1" # Mark if there are subdirectories
+                fi
+            done
+
+            # Recursively process lower-level directories
+            if [[ $HAS_LOWER_LEVELS == "1" ]] ; then
+                parseFolder "$folder" "$2#"
+            fi
+        fi
+    done
+}
+
+# Initialize README files
+echo "# <center>CodeGeek FSE Theme Library</center>" > ${SCRIPT_DIR}/readme.md
+echo "<div style='page-break-after: always;'></div>" >> ${SCRIPT_DIR}/readme.md
+echo "<center>Table of Contents</center>" >> ${SCRIPT_DIR}/readme.md
+echo "" >> ${SCRIPT_DIR}/readme.md
+echo "<div style='page-break-after: always;'></div>" > ${SCRIPT_DIR}/readme1.md
+echo "" >> ${SCRIPT_DIR}/readme1.md
+
+# Start parsing the specified folder
+parseFolder /Users/malaikamirza/CodeGeek/codegeek-theme-fse-library "##"
+
+# Append the detailed content to the README
+cat ${SCRIPT_DIR}/readme1.md >> ${SCRIPT_DIR}/readme.md
+rm ${SCRIPT_DIR}/readme1.md # Remove the temporary file
